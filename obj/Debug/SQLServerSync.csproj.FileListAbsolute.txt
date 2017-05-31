@@ -1,0 +1,5 @@
+E:\Develop\github\SQLServerSync\bin\Debug\SQLServerSync.exe.config
+E:\Develop\github\SQLServerSync\bin\Debug\SQLServerSync.exe
+E:\Develop\github\SQLServerSync\bin\Debug\SQLServerSync.pdb
+E:\Develop\github\SQLServerSync\obj\Debug\SQLServerSync.exe
+E:\Develop\github\SQLServerSync\obj\Debug\SQLServerSync.pdb

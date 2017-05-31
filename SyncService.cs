@@ -223,9 +223,11 @@ namespace SQLServerSync
                 bool isFirst = true;
                 for (int i = index; i < pageCount; i++)
                 {
-                    long startIndex = i * pageSize;
-                    long endIndex1 = startIndex + pageSize > c1 ? c1 : startIndex + pageSize;
-                    long endIndex2 = startIndex + pageSize > c2 ? c2 : startIndex + pageSize;
+                    long startIndex = i * pageSize + 1;
+
+                    long endIndex1 = (i + 1) * pageSize > c1 ? c1 : i * pageSize + pageSize;
+
+                    long endIndex2 = startIndex + pageSize > c2 ? c2 : endIndex1;
 
                     sourceCmd.CommandText = string.Format(selectSql, mapTable.SourceTableColumns[0], sourceTabName, startIndex, endIndex1);
                     targetCmd.CommandText = string.Format(selectSql, mapTable.TargetTableColumns[0], targetTabName, startIndex, endIndex2);
@@ -273,7 +275,7 @@ namespace SQLServerSync
                         //syncCount += rowCount;
                         targetAda.Update(tempTable);
                         targetTable.AcceptChanges();
-                        string logTxt = string.Format("     同步{0}到{1}行的{2}条数据", startIndex, endIndex2, rowCount);
+                        string logTxt = string.Format("     同步{0}到{1}行的{2}条数据", startIndex, endIndex1, rowCount);
                         writeLog(logTxt);
                     }
                 }
