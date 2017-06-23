@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SQLServerSync
+namespace ZD.SyncDB
 {
     public class MapDataSet
     {

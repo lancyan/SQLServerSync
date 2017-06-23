@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SQLServerSync
+namespace ZD.SyncDB
 {
     public class SyncMap
     {
@@ -29,7 +29,7 @@ namespace SQLServerSync
         public int Direction { get; set; }
 
         /// <summary>
-        /// 是否增量同步,针对部分只有插入操作的表可以提高同步效率
+        /// 是否增量同步
         /// </summary>
         public bool IsAddSync { get; set; }
 

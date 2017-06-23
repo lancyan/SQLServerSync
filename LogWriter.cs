@@ -8,7 +8,7 @@ using System.Net;
 using System.Diagnostics;
 using System.Threading;
 
-namespace SQLServerSync
+namespace ZD.SyncDB
 {
     public class LogWriter
     {

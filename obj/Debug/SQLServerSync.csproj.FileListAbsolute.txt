@@ -3,3 +3,5 @@ E:\Develop\github\SQLServerSync\bin\Debug\SQLServerSync.exe
 E:\Develop\github\SQLServerSync\bin\Debug\SQLServerSync.pdb
 E:\Develop\github\SQLServerSync\obj\Debug\SQLServerSync.exe
 E:\Develop\github\SQLServerSync\obj\Debug\SQLServerSync.pdb
+E:\Develop\Github\SQLServerSync\bin\Debug\db.xml
+E:\Develop\Github\SQLServerSync\obj\Debug\SQLServerSync.csprojResolveAssemblyReference.cache

@@ -7,20 +7,27 @@ using System.Data.SqlClient;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
-namespace SQLServerSync
+namespace ZD.SyncDB
 {
     public class SyncService
     {
-        LogWriter log = new LogWriter("sync_log.txt");
-        public SyncService(List<SyncMap> smlist, string sourceConnectString, string targetConnectString)
+        LogWriter log = null;
+        public SyncService(LogWriter lw, string timeFormat, List<SyncMap> smlist, string sourceConnectString, string targetConnectString)
         {
+            this.log = lw;
+            this.pattern = timeFormat;
             this.sourceConnectString = sourceConnectString;
             this.targetConnectString = targetConnectString;
 
             this.SourceConnection = new SqlConnection(sourceConnectString);
             this.TargetConnection = new SqlConnection(targetConnectString);
+
+            this.SourceConnection.Open();
+
+            this.TargetConnection.Open();
 
             this.synclist = smlist;
         }
@@ -44,10 +51,6 @@ namespace SQLServerSync
                 {
                     _sourceConnection = new SqlConnection();
                 }
-                if (_sourceConnection.State != ConnectionState.Open)
-                {
-                    _sourceConnection.Open();
-                }
                 return _sourceConnection;
             }
             set
@@ -64,10 +67,6 @@ namespace SQLServerSync
                 {
                     _targetConnection = new SqlConnection(targetConnectString);
                 }
-                if (_targetConnection.State != ConnectionState.Open)
-                {
-                    _targetConnection.Open();
-                }
                 return _targetConnection;
             }
             set
@@ -77,24 +76,21 @@ namespace SQLServerSync
         }
 
 
-         ~SyncService()
+        public void Close()
         {
             SourceConnection.Close();
             TargetConnection.Close();
-            SourceConnection.Dispose();
-            TargetConnection.Dispose();
         }
-
+        private string pattern = "";
         Hashtable hashTable = new Hashtable(10240);
 
         const int pageSize = 2000;
-        const string countSql = "SELECT count(*) FROM {0}";
+        const string countSql = "SELECT COUNT(0) FROM {0}";
         //sqlserver2000以上
         //const string selectSql = "SELECT TOP {0} * FROM [{1}] WHERE ID>ISNULL((SELECT MAX(ID) FROM(SELECT TOP {2} ID FROM [{1}] ORDER BY ID) AS TEMP),0)";
         //sqlserver2005以上
-
         const string selectColumns = "SELECT Name FROM SysColumns WHERE id=Object_Id('{0}')";
-        const string selectSql = "select * from (select row_number() over(order by {0}) as RowIndex,* from {1}) as t where RowIndex between {2} and {3}";
+        const string selectSql = "SELECT * FROM (SELECT row_number() over(order by {0}) as RowIndex,* FROM {1}) as t where RowIndex between {2} and {3}";
 
         const string insertSql = "INSERT INTO {0}({1}) VALUES({2})";
         const string updateSql = "UPDATE {0} SET {1} WHERE {2}";
@@ -104,7 +100,6 @@ namespace SQLServerSync
         {
             //int pageIndex = 0;
             //string selectSql = @"select top {0} * from (select row_number() over(order by id) as rownumber,* from [{1}]) A where rownumber > {2}";
-
             SqlCommand sourceCmd = new SqlCommand();
             SqlCommand targetCmd = new SqlCommand();
 
@@ -114,24 +109,48 @@ namespace SQLServerSync
 
             foreach (var mapTable in synclist)
             {
-                if (mapTable.Direction == 0)
+                try
                 {
-                    SyncTable(sourceAda, targetAda, mapTable, SourceConnection, TargetConnection);
+                    if (mapTable.Direction == 0)
+                    {
+                        SyncTable(sourceAda, targetAda, mapTable, SourceConnection, TargetConnection);
+                    }
+                    else if (mapTable.Direction == 1)
+                    {
+                        SyncTable(targetAda, sourceAda, mapTable, TargetConnection, SourceConnection);
+                    }
                 }
-                else if (mapTable.Direction == 1)
+                catch (Exception ex)
                 {
-                    SyncTable(targetAda, sourceAda, mapTable, TargetConnection, SourceConnection);
+                    WriteLog(ex.Message);
                 }
+              
+
             }
 
 
         }
 
-        private void writeLog(string msg)
+        private void WriteLog(string msg)
         {
             Console.WriteLine(msg);
             log.WriteLine(msg);
         }
+
+        private string formatTableName(string tabName)
+        {
+            if (!string.IsNullOrEmpty(pattern))
+            {
+                if (Regex.IsMatch(tabName, pattern))
+                {
+                    string date = DateTime.Now.ToString(pattern).TrimStart('{').TrimEnd('}');
+                    //string date = DateTime.Now.ToString(pattern);
+                    tabName = Regex.Replace(tabName, Regex.Escape(pattern), date);
+                }
+            }
+            return tabName;
+        }
+
 
         private List<string> SyncColumns(SqlCommand cmd)
         {
@@ -150,7 +169,11 @@ namespace SQLServerSync
             string sourceTabName = mapTable.SourceTableName;
             string targetTabName = mapTable.TargetTableName;
 
-            writeLog(string.Format("<----开始同步{0}表---->", targetTabName));
+            sourceTabName =  formatTableName(sourceTabName);
+            targetTabName = formatTableName(targetTabName);
+
+
+            WriteLog(string.Format("<----开始同步{0}表---->", targetTabName));
 
  
             SqlCommand sourceCmd = sourceAda.SelectCommand;
@@ -184,11 +207,6 @@ namespace SQLServerSync
                 mapTable.TargetTableColumns = SyncColumns(targetCmd);
             }
 
-            //=========================================================
-
-           
-            //=========================================================
-
             bool isCheckTableSchema = mapTable.IsCheckTableSchema;
             bool isDeleteTargetRow = mapTable.IsDeleteTargetRow;
             bool isAddSync = mapTable.IsAddSync;
@@ -196,8 +214,17 @@ namespace SQLServerSync
             sourceCmd.CommandText = string.Format(countSql, sourceTabName);
             targetCmd.CommandText = string.Format(countSql, targetTabName);
 
-            object o1 = sourceCmd.ExecuteScalar();
-            object o2 = targetCmd.ExecuteScalar();
+            object o1 = null, o2 = null;
+            try
+            {
+                o1 = sourceCmd.ExecuteScalar();
+                o2 = targetCmd.ExecuteScalar();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                return;
+            }
 
             //long syncCount = 0;
             long c1 = o1 == null || o1 is DBNull ? 0 : Int64.Parse(o1.ToString());
@@ -229,6 +256,7 @@ namespace SQLServerSync
 
                     long endIndex2 = startIndex + pageSize > c2 ? c2 : endIndex1;
 
+                    
                     sourceCmd.CommandText = string.Format(selectSql, mapTable.SourceTableColumns[0], sourceTabName, startIndex, endIndex1);
                     targetCmd.CommandText = string.Format(selectSql, mapTable.TargetTableColumns[0], targetTabName, startIndex, endIndex2);
 
@@ -260,7 +288,7 @@ namespace SQLServerSync
                         isFirst = false;
                     }
 
-                    #region sqlcommandBuilder
+                    #region sqlCommandBuilder
                     //SqlCommandBuilder scb = new SqlCommandBuilder(targetAda);
                     //scb.ConflictOption = ConflictOption.OverwriteChanges;
                     //targetAda.InsertCommand = scb.GetInsertCommand();
@@ -276,11 +304,11 @@ namespace SQLServerSync
                         targetAda.Update(tempTable);
                         targetTable.AcceptChanges();
                         string logTxt = string.Format("     同步{0}到{1}行的{2}条数据", startIndex, endIndex1, rowCount);
-                        writeLog(logTxt);
+                        WriteLog(logTxt);
                     }
                 }
             }
-            writeLog(string.Format("<----同步{0}表结束---->", targetTabName));
+            WriteLog(string.Format("<----同步{0}表结束---->", targetTabName));
             //return syncCount;
         }
 
@@ -654,8 +682,7 @@ namespace SQLServerSync
             object[] objs = new object[pcs.Length];
             for (int i = 0, count = pcs.Length; i < count; i++)
             {
-                string columnName = pcs[i].ColumnName;
-                objs[i] = row[columnName];
+                objs[i] = row[pcs[i].ColumnName];
             }
             return objs;
         }
@@ -684,6 +711,7 @@ namespace SQLServerSync
                 tableB.LoadDataRow(tableA.Rows[i].ItemArray, LoadOption.Upsert);
             }
             tableB.EndLoadData();
+            //tableB.AcceptChanges(); //这个是关键
         }
 
 
