@@ -7,7 +7,7 @@
     <table SourceTableName="ZD_WbAndWxDatas" TargetTableName="ZD_WbAndWxDatas"/>
     <table SourceTableName="ZD_WxAndWbHotWordLists" TargetTableName="ZD_WxAndWbHotWordLists"/>
     <table SourceTableName="ZD_WxAndWbLists" TargetTableName="ZD_WxAndWbLists"/>
-    <table SourceTableName="ZD_WxAndWbTitles{yyyyMM}" TargetTableName="ZD_WxAndWbTitles{yyyyMM}" IsAddSync="1"/>
+    <table SourceTableName="ZD_WxAndWbTitles{yyyyMM}" TargetTableName="ZD_WxAndWbTitles{yyyyMM}" IsAddSync="1" SubTimeSpan="1"/>
     <table SourceTableName="ZD_VideoPlayDatas" TargetTableName="ZD_VideoPlayDatas"/>
     <table SourceTableName="ZD_CommonListNames" TargetTableName="ZD_CommonListNames" Direction="1"/>
     <table SourceTableName="ZD_CommonListTypes" TargetTableName="ZD_CommonListTypes" Direction="1"/>
