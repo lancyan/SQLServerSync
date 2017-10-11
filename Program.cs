@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -24,16 +24,22 @@ namespace ZD.SyncDB
         static string sourceConnectString = System.Configuration.ConfigurationManager.ConnectionStrings["sourceDB"].ConnectionString;
         static string targetConnectString = System.Configuration.ConfigurationManager.ConnectionStrings["targetDB"].ConnectionString;
         static string timeFormat = System.Configuration.ConfigurationManager.AppSettings["timeFormat"].ToString();
-
+        static int pageSize = Int32.Parse(System.Configuration.ConfigurationManager.AppSettings["pageSize"].ToString());
+        static int sleepTime = Int32.Parse(System.Configuration.ConfigurationManager.AppSettings["sleepTime"].ToString());
+        static int threadCount = Int32.Parse(System.Configuration.ConfigurationManager.AppSettings["threadCount"].ToString());
         static LogWriter log = new LogWriter("sync_log.txt");
 
         static void Main(string[] args)
         {
-            if (GetRunningInstance() != null)
+            if (threadCount > 0)
             {
-                Console.WriteLine("已经运行了一个实例了。");
-                return;
+                if (GetRunningInstance() != null)
+                {
+                    Console.WriteLine("已经运行了一个实例了。");
+                    return;
+                }
             }
+          
 
             List<SyncMap> synclist = new List<SyncMap>();
 
@@ -66,8 +72,6 @@ namespace ZD.SyncDB
             }
 
           
-
-            //Console.WriteLine(" 按回车键结束程序");
             Console.WriteLine(" 程序开始执行......");
             Stopwatch oTime = new Stopwatch();
 
@@ -77,7 +81,7 @@ namespace ZD.SyncDB
                 SyncService ss = null;
                 try
                 {
-                    ss = new SyncService(log, timeFormat, synclist, sourceConnectString, targetConnectString);
+                    ss = new SyncService(log, pageSize, timeFormat, synclist, sourceConnectString, targetConnectString);
                 }
                 catch (Exception e1)
                 {
@@ -85,12 +89,12 @@ namespace ZD.SyncDB
                 }
                 if (ss == null)
                 {
-                    WriteLog("等待10秒......");
+                    WriteLog("数据库连接失败, 等待10秒......");
                     Thread.Sleep(10 * 1000);
                     continue;
                 }
                 WriteLog(DateTime.Now.ToLongTimeString() + "  数据同步程序执行开始．．．．．．");
-                //<======
+                //<===========
                 oTime.Start(); 
                 ss.DoSyncTask();
                 oTime.Stop();
@@ -98,9 +102,9 @@ namespace ZD.SyncDB
                 Console.WriteLine();
                 Console.WriteLine();
                 oTime.Reset();
-                //=====>
+                //===========>
                 ss.Close();
-                Thread.Sleep(10 * 1000);
+                Thread.Sleep(sleepTime);
             }
         }
 
@@ -125,17 +129,58 @@ namespace ZD.SyncDB
         {
             SyncMap sm = new SyncMap();
 
-            //sm.SourceTableName = node
+            sm.IsCheckTableSchema = IsDefined(node, "IsCheckTableSchema");
 
-            sm.IsCheckTableSchema = node.Attributes["IsCheckTableSchema"] == null ? false : "1".Equals(node.Attributes["IsCheckTableSchema"].Value);
+            sm.IsAddSync = IsDefined(node, "IsAddSync"); 
 
-            sm.IsAddSync = node.Attributes["IsAddSync"] == null ? false : "1".Equals(node.Attributes["IsAddSync"].Value);
+            sm.IsDeleteTargetRow = IsDefined(node, "IsDeleteTargetRow"); 
 
-            sm.IsDeleteTargetRow = node.Attributes["IsDeleteTargetRow"] == null ? false : "1".Equals(node.Attributes["IsDeleteTargetRow"].Value);
+            sm.Direction = GetDefined(node, "Direction");
 
-            sm.Direction = node.Attributes["Direction"] == null || string.IsNullOrWhiteSpace(node.Attributes["Direction"].Value) ? 0 : Int32.Parse(node.Attributes["Direction"].Value);
+            sm.SubTimeSpan = GetDefined(node, "SubTimeSpan");
 
             return sm;
+        }
+
+        private static int GetDefined(XmlNode node, string key)
+        {
+            int result = 0;
+
+            if (!string.IsNullOrEmpty(key))
+            {
+                XmlAttribute attr = node.Attributes[key];
+                if (attr != null)
+                {
+                    string val = attr.Value;
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        Int32.TryParse(val, out result);
+                    }
+                }
+            }
+            return result;
+        }
+
+        private static bool IsDefined(XmlNode node, string key)
+        {
+            bool result = false;
+
+            if (!string.IsNullOrEmpty(key))
+            {
+                XmlAttribute attr = node.Attributes[key];
+                if (attr != null)
+                {
+                    string val = attr.Value;
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        if (val.Equals("1") || val.Equals("true", StringComparison.OrdinalIgnoreCase))
+                        {
+                            result = true;
+                        }
+                    }
+                }
+            }
+            return result;
         }
 
         private static T IntersectionMap<T>(T p, T c)
@@ -223,7 +268,6 @@ namespace ZD.SyncDB
                 }
             }
             return null;
-
         }
 
 
