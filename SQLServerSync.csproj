@@ -46,6 +46,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="LogWriter.cs" />
+    <Compile Include="MapColumn.cs" />
     <Compile Include="MapDataSet.cs" />
     <Compile Include="MapDataTable.cs" />
     <Compile Include="Program.cs" />
