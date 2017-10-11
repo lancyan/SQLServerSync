@@ -15,11 +15,11 @@ namespace ZD.SyncDB
 
         public string TargetTableName;
 
-        public List<string> SourceTableColumns;
+        public List<MapColumn> SourceTableColumns;
 
-        public List<string> TargetTableColumns;
+        public List<MapColumn> TargetTableColumns;
 
-
+        public int SubTimeSpan { get; set; }
 
         /// <summary>
         /// 0代表source-->target 单向同步
