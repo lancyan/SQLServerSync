@@ -50,7 +50,7 @@ namespace ZD.SyncDB
                 }
                 if (!isNetAddress)
                 {
-                    Match mAddress = Regex.Match(fileName, @"\\\\(.*?)\\");
+                    Match mAddress = Regex.Match(fileName, @"^\\\\(.*?)\\");
                     if (mAddress.Success)
                     {
                         string machineName = mAddress.Result("$1");
@@ -182,7 +182,7 @@ namespace ZD.SyncDB
             try
             {
                 content += newLine;
-                encoding = encoding ?? System.Text.Encoding.Default;
+                encoding = encoding ?? System.Text.Encoding.UTF8;
                 lock (locker)
                 {
                     FileInfo fi = new FileInfo(FileName);
