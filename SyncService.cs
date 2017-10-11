@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Data.Common;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.Linq;
@@ -15,21 +16,23 @@ namespace ZD.SyncDB
     public class SyncService
     {
         LogWriter log = null;
-        public SyncService(LogWriter lw, string timeFormat, List<SyncMap> smlist, string sourceConnectString, string targetConnectString)
+        public SyncService(LogWriter lw, int pageSize, string timeFormat, List<SyncMap> smlist, string sourceConnectString, string targetConnectString)
         {
-            this.log = lw;
-            this.pattern = timeFormat;
-            this.sourceConnectString = sourceConnectString;
-            this.targetConnectString = targetConnectString;
-
-            this.SourceConnection = new SqlConnection(sourceConnectString);
-            this.TargetConnection = new SqlConnection(targetConnectString);
-
-            this.SourceConnection.Open();
-
-            this.TargetConnection.Open();
-
             this.synclist = smlist;
+
+            if (smlist.Count > 0)
+            {
+                this.log = lw;
+                this.pageSize = pageSize;
+                this.pattern = timeFormat;
+                this.sourceConnectString = sourceConnectString;
+                this.targetConnectString = targetConnectString;
+
+                this.SourceConnection = new SqlConnection(sourceConnectString);
+                this.TargetConnection = new SqlConnection(targetConnectString);
+                this.SourceConnection.Open();
+                this.TargetConnection.Open();
+            }
         }
 
 
@@ -82,14 +85,16 @@ namespace ZD.SyncDB
             TargetConnection.Close();
         }
         private string pattern = "";
+        //private int subTimeSpan = 0;
+
         Hashtable hashTable = new Hashtable(10240);
 
-        const int pageSize = 2000;
+        int pageSize = 2000;
         const string countSql = "SELECT COUNT(0) FROM {0}";
         //sqlserver2000以上
         //const string selectSql = "SELECT TOP {0} * FROM [{1}] WHERE ID>ISNULL((SELECT MAX(ID) FROM(SELECT TOP {2} ID FROM [{1}] ORDER BY ID) AS TEMP),0)";
         //sqlserver2005以上
-        const string selectColumns = "SELECT Name FROM SysColumns WHERE id=Object_Id('{0}')";
+        const string selectColumns = "SELECT TOP 1 * FROM {0}";  //SELECT Name FROM SysColumns WHERE id=Object_Id('{0}') order by colstat desc
         const string selectSql = "SELECT * FROM (SELECT row_number() over(order by {0}) as RowIndex,* FROM {1}) as t where RowIndex between {2} and {3}";
 
         const string insertSql = "INSERT INTO {0}({1}) VALUES({2})";
@@ -100,35 +105,37 @@ namespace ZD.SyncDB
         {
             //int pageIndex = 0;
             //string selectSql = @"select top {0} * from (select row_number() over(order by id) as rownumber,* from [{1}]) A where rownumber > {2}";
-            SqlCommand sourceCmd = new SqlCommand();
-            SqlCommand targetCmd = new SqlCommand();
-
-            SqlDataAdapter sourceAda = new SqlDataAdapter(sourceCmd);
-            SqlDataAdapter targetAda = new SqlDataAdapter(targetCmd);
-
-
-            foreach (var mapTable in synclist)
+            if (synclist.Count > 0)
             {
-                try
-                {
-                    if (mapTable.Direction == 0)
-                    {
-                        SyncTable(sourceAda, targetAda, mapTable, SourceConnection, TargetConnection);
-                    }
-                    else if (mapTable.Direction == 1)
-                    {
-                        SyncTable(targetAda, sourceAda, mapTable, TargetConnection, SourceConnection);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    WriteLog(ex.Message);
-                }
-              
+                SqlCommand sourceCmd = new SqlCommand();
+                SqlCommand targetCmd = new SqlCommand();
 
+                SqlDataAdapter sourceAda = new SqlDataAdapter(sourceCmd);
+                SqlDataAdapter targetAda = new SqlDataAdapter(targetCmd);
+
+
+                foreach (var mapTable in synclist)
+                {
+                    try
+                    {
+                        //subTimeSpan = mapTable.SubTimeSpan;
+
+                        if (mapTable.Direction == 0)
+                        {
+                            SyncTable(sourceAda, targetAda, mapTable, SourceConnection, TargetConnection);
+                        }
+                        else if (mapTable.Direction == 1)
+                        {
+                            SyncTable(targetAda, sourceAda, mapTable, TargetConnection, SourceConnection);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteLog(ex.Message);
+                    }
+                }
             }
-
-
+          
         }
 
         private void WriteLog(string msg)
@@ -137,14 +144,13 @@ namespace ZD.SyncDB
             log.WriteLine(msg);
         }
 
-        private string formatTableName(string tabName)
+        private string formatTableName(SyncMap mapTable, string tabName)
         {
             if (!string.IsNullOrEmpty(pattern))
             {
                 if (Regex.IsMatch(tabName, pattern))
                 {
-                    string date = DateTime.Now.ToString(pattern).TrimStart('{').TrimEnd('}');
-                    //string date = DateTime.Now.ToString(pattern);
+                    string date = DateTime.Now.AddMonths(-mapTable.SubTimeSpan).ToString(pattern).TrimStart('{').TrimEnd('}');
                     tabName = Regex.Replace(tabName, Regex.Escape(pattern), date);
                 }
             }
@@ -152,65 +158,120 @@ namespace ZD.SyncDB
         }
 
 
-        private List<string> SyncColumns(SqlCommand cmd)
+        private bool SyncColumns(SqlCommand sourceCmd, SqlCommand targetCmd, SyncMap mapTable,string sourceTableName,string targetTableName)
         {
-            SqlDataReader reader = cmd.ExecuteReader();
-            List<string> list = new List<string>();
-            while (reader.Read())
+            bool flag = false;
+            //第一次查询记录
+            sourceCmd.CommandText = string.Format(selectColumns, sourceTableName);
+            targetCmd.CommandText = string.Format(selectColumns, targetTableName);
+
+            if (mapTable.SourceTableColumns == null)
             {
-                list.Add(reader[0].ToString());
+                mapTable.SourceTableColumns = new List<MapColumn>();
+                using (SqlDataReader reader = sourceCmd.ExecuteReader(CommandBehavior.KeyInfo))
+                {
+                    DataTable dd = reader.GetSchemaTable();
+                    foreach (DataRow dr in dd.Rows)
+                    {
+                        mapTable.SourceTableColumns.Add(new MapColumn() { Name = dr["ColumnName"].ToString(), ColumnType = Type.GetType(dr["DataType"].ToString(), true, true), IsPrimaryKey = bool.Parse(dr["IsKey"].ToString()) });
+                    }
+                }
             }
-            reader.Close();
-            return list;
+            if (mapTable.TargetTableColumns == null)
+            {
+                mapTable.TargetTableColumns = new List<MapColumn>();
+                using (SqlDataReader reader = targetCmd.ExecuteReader(CommandBehavior.KeyInfo))
+                {
+                    DataTable dd = reader.GetSchemaTable();
+                    foreach (DataRow dr in dd.Rows)
+                    {
+                        mapTable.TargetTableColumns.Add(new MapColumn() { Name = dr["ColumnName"].ToString(), ColumnType = Type.GetType(dr["DataType"].ToString(), true, true), IsPrimaryKey = bool.Parse(dr["IsKey"].ToString()) });
+                    }
+                }
+            }
+            int c1 = mapTable.SourceTableColumns.Count;
+            int c2 = mapTable.TargetTableColumns.Count;
+            bool isSame = true;
+            if (c1 == c2)
+            {
+                var plist1 = mapTable.SourceTableColumns.Where(p => p.IsPrimaryKey);
+                var plist2 = mapTable.TargetTableColumns.Where(p => p.IsPrimaryKey);
+
+                int pc1 = plist1.Count();
+                int pc2 = plist2.Count();
+                if (pc1 == pc2)
+                {
+                    for (int i = 0; i < pc1; i++)
+                    {
+                        var item1 = plist1.ElementAt(i);
+                        var item2 = plist2.ElementAt(i);
+                        if (item1.IsPrimaryKey != item2.IsPrimaryKey || item1.ColumnType != item2.ColumnType || !item1.Name.Equals(item2.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isSame = false;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    isSame = false;
+                }
+            }
+            else
+            {
+                isSame = false;
+            }
+
+            return isSame;
         }
 
-        private void SyncTable(SqlDataAdapter sourceAda, SqlDataAdapter targetAda, SyncMap mapTable, SqlConnection sourceConnection,SqlConnection targetConnection)
+
+
+        private bool SyncTable(SqlDataAdapter sourceAda, SqlDataAdapter targetAda, SyncMap mapTable, SqlConnection sourceConnection, SqlConnection targetConnection)
         {
+            bool isSync = false;
+
             string sourceTabName = mapTable.SourceTableName;
             string targetTabName = mapTable.TargetTableName;
+            
 
-            sourceTabName =  formatTableName(sourceTabName);
-            targetTabName = formatTableName(targetTabName);
+            sourceTabName = formatTableName(mapTable, sourceTabName);
+            targetTabName = formatTableName(mapTable, targetTabName);
 
-
+           
             WriteLog(string.Format("<----开始同步{0}表---->", targetTabName));
 
- 
+
             SqlCommand sourceCmd = sourceAda.SelectCommand;
             SqlCommand targetCmd = targetAda.SelectCommand;
 
             SqlCommand targetInsertCmd = new SqlCommand();
             SqlCommand targetUpdateCmd = new SqlCommand();
             SqlCommand targetDeleteCmd = new SqlCommand();
+            //---------------------------------------------
+
+            sourceCmd.Connection = sourceConnection;
+            targetCmd.Connection = targetConnection;
 
             targetAda.InsertCommand = targetInsertCmd;
             targetAda.UpdateCommand = targetUpdateCmd;
             targetAda.DeleteCommand = targetDeleteCmd;
 
-
-            sourceCmd.Connection = sourceConnection;
-            targetCmd.Connection = targetConnection;
-
             targetInsertCmd.Connection = targetConnection;
             targetUpdateCmd.Connection = targetConnection;
             targetDeleteCmd.Connection = targetConnection;
 
-            sourceCmd.CommandText = string.Format(selectColumns, sourceTabName);
-            targetCmd.CommandText = string.Format(selectColumns, targetTabName);
-
-            if (mapTable.SourceTableColumns == null)
+            //同步列
+            if (!SyncColumns(sourceCmd, targetCmd, mapTable, sourceTabName, targetTabName))
             {
-                mapTable.SourceTableColumns = SyncColumns(sourceCmd);
-            }
-            if (mapTable.TargetTableColumns == null)
-            {
-                mapTable.TargetTableColumns = SyncColumns(targetCmd);
+                WriteLog("主键类型不一致");
+                isSync = false;
             }
 
             bool isCheckTableSchema = mapTable.IsCheckTableSchema;
             bool isDeleteTargetRow = mapTable.IsDeleteTargetRow;
             bool isAddSync = mapTable.IsAddSync;
-
+            //第二次查询记录条数
             sourceCmd.CommandText = string.Format(countSql, sourceTabName);
             targetCmd.CommandText = string.Format(countSql, targetTabName);
 
@@ -223,12 +284,11 @@ namespace ZD.SyncDB
             catch (Exception ex)
             {
                 Console.WriteLine(ex.Message);
-                return;
+                isSync = false;
             }
 
-            //long syncCount = 0;
-            long c1 = o1 == null || o1 is DBNull ? 0 : Int64.Parse(o1.ToString());
-            long c2 = o2 == null || o2 is DBNull ? 0 : Int64.Parse(o2.ToString());
+            long c1 = o1 == null || o1 is DBNull ? 0 : long.Parse(o1.ToString());
+            long c2 = o2 == null || o2 is DBNull ? 0 : long.Parse(o2.ToString());
 
             if (c1 > 0)
             {
@@ -238,14 +298,7 @@ namespace ZD.SyncDB
                 if (isAddSync)
                 {
                     targetCmd.CommandText = string.Format(countSql, targetTabName);
-                    if (c1 == c2)
-                    {
-                        index = pageCount;
-                    }
-                    else
-                    {
-                        index = (int)Math.Floor(c2 / (double)pageSize);
-                    }
+                    index = c1 == c2 ? pageCount : (int)Math.Floor(c2 / (double)pageSize);
                 }
                 bool isFirst = true;
                 for (int i = index; i < pageCount; i++)
@@ -256,9 +309,10 @@ namespace ZD.SyncDB
 
                     long endIndex2 = startIndex + pageSize > c2 ? c2 : endIndex1;
 
-                    
-                    sourceCmd.CommandText = string.Format(selectSql, mapTable.SourceTableColumns[0], sourceTabName, startIndex, endIndex1);
-                    targetCmd.CommandText = string.Format(selectSql, mapTable.TargetTableColumns[0], targetTabName, startIndex, endIndex2);
+                    #region 填充数据
+                    //第三次查询分页记录
+                    sourceCmd.CommandText = string.Format(selectSql, string.Join(",", mapTable.SourceTableColumns.FindAll(p => p.IsPrimaryKey == true).Select(x => x.Name)), sourceTabName, startIndex, endIndex1);
+                    targetCmd.CommandText = string.Format(selectSql, string.Join(",", mapTable.TargetTableColumns.FindAll(p => p.IsPrimaryKey == true).Select(x => x.Name)), targetTabName, startIndex, endIndex2);
 
                     DataTable sourceTable = new DataTable(sourceTabName);
                     sourceAda.MissingSchemaAction = MissingSchemaAction.AddWithKey;
@@ -267,6 +321,7 @@ namespace ZD.SyncDB
                     DataTable targetTable = new DataTable(targetTabName);
                     targetAda.MissingSchemaAction = MissingSchemaAction.AddWithKey;
                     targetAda.Fill(targetTable);
+                    #endregion
 
                     #region copy Data
                     if (isCheckTableSchema)
@@ -274,6 +329,10 @@ namespace ZD.SyncDB
                         if (CompareTableSchema(sourceTable, targetTable))
                         {
                             CopyDataTable(sourceTable, targetTable, isDeleteTargetRow);
+                        }
+                        else
+                        {
+                            WriteLog(string.Format("{0}与{1}表结构不一致", sourceTabName, targetTabName));
                         }
                     }
                     else
@@ -302,15 +361,30 @@ namespace ZD.SyncDB
                         int rowCount = tempTable.Rows.Count;
                         //syncCount += rowCount;
                         targetAda.Update(tempTable);
+
                         targetTable.AcceptChanges();
                         string logTxt = string.Format("     同步{0}到{1}行的{2}条数据", startIndex, endIndex1, rowCount);
+                        WriteLog(logTxt);
+                        isSync = true;
+                    }
+                    else
+                    {
+                        string logTxt = string.Format("     同步{0}到{1}行的{2}条数据", startIndex, endIndex1, 0);
                         WriteLog(logTxt);
                     }
                 }
             }
+            if (mapTable.SubTimeSpan > 0)
+            {
+                mapTable.SubTimeSpan--;
+                SyncTable(sourceAda, targetAda, mapTable, sourceConnection, targetConnection);
+            }
+
             WriteLog(string.Format("<----同步{0}表结束---->", targetTabName));
-            //return syncCount;
+            return isSync;
         }
+
+       
 
         private DbType GetDBType(Type theType)
         {
@@ -327,7 +401,6 @@ namespace ZD.SyncDB
             //    }
             //    catch (Exception) { }
             //}
-
             //return idbDataParameter.DbType;
             SqlParameter p1 = new SqlParameter();
             TypeConverter tc = TypeDescriptor.GetConverter(p1.DbType);
@@ -537,6 +610,7 @@ namespace ZD.SyncDB
                 foreach (DataColumn dc in dt.Columns)
                 {
                     string columnName = dc.ColumnName;
+                   
                     if (dc.AutoIncrement)
                     {
                         //若没有设置主键，用自增列作为主键
@@ -694,25 +768,54 @@ namespace ZD.SyncDB
         /// <param name="targetTab"> table B</param>
         private void CopyDataTable(DataTable tableA, DataTable tableB, bool IsDeleteTargetRow = false)
         {
-            tableB.AcceptChanges(); //这个是关键
+            //tableB.AcceptChanges(); //这个是关键
             tableB.BeginLoadData();
             int c1 = tableA.Rows.Count;
             int c2 = tableB.Rows.Count;
-
             if (IsDeleteTargetRow)
             {
+                var pks = tableB.PrimaryKey.Select<DataColumn, string>(p => p.ColumnName);
+                int len = pks.Count();
+                //遍历TableB里的在tableA中不存在的数据行删除掉
                 for (int i = 0; i < c2; i++)
                 {
-                    tableB.Rows[i].Delete();
+                    DataRow dr = tableB.Rows[i];
+                    object[] objs = new object[len];
+                    for (int x = 0; x < len; x++)
+                    {
+                        objs[x] = dr[pks.ElementAt(x)];
+                    }
+                    //var rr = tableA.Rows.Find(objs);
+                    if (!tableA.Rows.Contains(objs))
+                    {
+                        tableB.Rows[i].Delete();
+                    }
+                }
+                for (int i = 0; i < c1; i++)
+                {
+                    DataRow dr = tableA.Rows[i];
+                    tableB.LoadDataRow(dr.ItemArray, LoadOption.Upsert);
                 }
             }
-            for (int i = 0; i < c1; i++)
+            else
             {
-                tableB.LoadDataRow(tableA.Rows[i].ItemArray, LoadOption.Upsert);
+                for (int i = 0; i < c1; i++)
+                {
+                    //OverwriteChanges 用输入行的值分别更新该行的当前版本和原始版本
+                    //PreserveChanges 默认选项。用输入行的值更新该行的原始版本
+                    //Upsert 用输入行的值更新该行的当前版本
+                    tableB.LoadDataRow(tableA.Rows[i].ItemArray, LoadOption.Upsert);
+                }
             }
+          
             tableB.EndLoadData();
-            //tableB.AcceptChanges(); //这个是关键
+
+            
+            
         }
+
+
+      
 
 
     }
